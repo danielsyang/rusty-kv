@@ -31,7 +31,7 @@ fn main() {
     let mut store =
         RustyKV::open(&path).expect(format!("Unable to open file: {}", filename).as_str());
 
-    let _rkv = store.load().expect("msg");
+    store.load().expect("Unable to load data");
 
     match action {
         "get" => store.get(key),
@@ -46,6 +46,4 @@ fn main() {
         },
         _ => eprintln!("{}", &USAGE),
     }
-
-    // match () {}
 }
