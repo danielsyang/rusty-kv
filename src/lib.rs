@@ -1,9 +1,9 @@
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{BufReader, Read, Result, Seek, SeekFrom},
+    io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -36,7 +36,7 @@ impl RustyKV {
         })
     }
 
-    pub fn load(&mut self) -> Result<Self> {
+    pub fn load(&mut self) -> Result<()> {
         let mut buff = BufReader::new(&mut self.f);
 
         loop {
@@ -44,11 +44,20 @@ impl RustyKV {
             let position = buff.seek(SeekFrom::Current(0)).unwrap();
             let maybe_kv = RustyKV::process_record(&mut buff);
 
-            let val = match maybe_kv {
+            let kv = match maybe_kv {
                 Ok(v) => v,
-                Err(err) => panic!(""),
+                Err(err) => match err.kind() {
+                    std::io::ErrorKind::UnexpectedEof => {
+                        // <3>
+                        break;
+                    }
+                    _ => return Err(err),
+                },
             };
+
+            self.index.insert(kv.key, position);
         }
+        return Ok(());
     }
 
     fn process_record<R: Read>(b: &mut R) -> Result<KeyValuePair> {
@@ -86,8 +95,15 @@ impl RustyKV {
         Ok(KeyValuePair { key, value })
     }
 
-    pub fn get(&self, key: &str) -> Result<()> {
-        todo!("not yet implemented!")
+    pub fn get(&mut self, key: &ByteStr) -> Result<Option<ByteString>> {
+        let position = match self.index.get(key) {
+            None => return Ok(None),
+            Some(v) => *v,
+        };
+
+        let kv = self.get_at(position).unwrap();
+
+        return Ok(Some(kv.value));
     }
 
     pub fn insert(&mut self, key: &ByteStr, value: &ByteStr) -> Result<()> {
@@ -97,15 +113,46 @@ impl RustyKV {
         Ok(())
     }
 
-    pub fn delete(&self, key: &str) -> Result<()> {
-        todo!("not yet implemented!")
+    pub fn delete(&mut self, key: &ByteStr) -> Result<()> {
+        return self.insert(key, b"");
     }
 
-    pub fn update(&self, key: &str, value: &str) -> Result<()> {
-        todo!("not yet implemented!")
+    pub fn update(&mut self, key: &ByteStr, value: &ByteStr) -> Result<()> {
+        return self.insert(key, value);
     }
 
-    fn insert_but_ignore_index(&self, key: &ByteStr, value: &ByteStr) -> Result<u64> {
-        todo!("not yet implemented!")
+    fn insert_but_ignore_index(&mut self, key: &ByteStr, value: &ByteStr) -> Result<u64> {
+        let mut bw = BufWriter::new(&mut self.f);
+
+        let key_len = key.len();
+        let val_len = value.len();
+        let mut tmp = ByteString::with_capacity(val_len + key_len);
+
+        for b in key {
+            tmp.push(*b);
+        }
+
+        for b in value {
+            tmp.push(*b)
+        }
+
+        let checksum = Crc::<u32>::new(&CRC_32_ISO_HDLC).checksum(&tmp);
+        let next_byte = SeekFrom::End(0);
+        let current_position = bw.seek(SeekFrom::Current(0))?;
+        bw.seek(next_byte)?;
+        bw.write_u32::<LittleEndian>(checksum).unwrap();
+        bw.write_u32::<LittleEndian>(key_len as u32).unwrap();
+        bw.write_u32::<LittleEndian>(val_len as u32).unwrap();
+        bw.write_all(&mut tmp).unwrap();
+
+        Ok(current_position)
+    }
+
+    fn get_at(&mut self, pos: u64) -> Result<KeyValuePair> {
+        let mut bf = BufReader::new(&mut self.f);
+        bf.seek(SeekFrom::Start(pos)).unwrap();
+        let kv = RustyKV::process_record(&mut bf).unwrap();
+
+        Ok(kv)
     }
 }

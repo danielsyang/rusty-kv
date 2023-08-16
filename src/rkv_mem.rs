@@ -24,7 +24,7 @@ fn main() {
     let args = env::args().collect::<Vec<_>>();
     let filename = args.get(1).expect(&USAGE);
     let action = args.get(2).expect(&USAGE).as_ref();
-    let key = args.get(3).expect(&USAGE);
+    let key = args.get(3).expect(&USAGE).as_ref();
     let value = args.get(4);
 
     let path = Path::new(&filename);
@@ -34,14 +34,19 @@ fn main() {
     store.load().expect("Unable to load data");
 
     match action {
-        "get" => store.get(key),
-        "delete" => store.delete(key),
+        "get" => {
+            match store.get(key).unwrap() {
+                Some(v) => println!("found value: {:?}", v),
+                _ => println!("not value found for key: {:?}", key),
+            };
+        }
+        "delete" => store.delete(key).unwrap(),
         "insert" => match value {
-            Some(v) => store.insert(key, v),
+            Some(v) => store.insert(key, v.as_ref()).unwrap(),
             None => eprintln!("{}", &USAGE),
         },
         "update" => match value {
-            Some(v) => store.update(key, v),
+            Some(v) => store.update(key, v.as_ref()).unwrap(),
             None => eprintln!("{}", &USAGE),
         },
         _ => eprintln!("{}", &USAGE),
